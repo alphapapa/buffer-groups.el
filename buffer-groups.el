@@ -1,4 +1,4 @@
-;;; buffer-groups.el --- Automatically group buffers  -*- lexical-binding: t; -*-
+;;; buffer-groups.el --- Group buffers automatically  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020  Adam Porter
 
@@ -23,7 +23,10 @@
 ;;; Commentary:
 
 ;; This is an early WIP.  The implementation is surprisingly simple
-;; and flexible.
+;; and flexible.  It's sort of like perspectives, but rather than
+;; assigning buffers to groups manually, it's done automatically with
+;; rules written by the user.  The groups can also be nested (if you
+;; are comfortable with that).
 
 ;;; Code:
 
@@ -36,7 +39,7 @@
 
 ;;;; Variables
 
-(defvar buffer-groups-current-group nil)
+(defvar buffer-groups-current-group-path nil)
 
 (defvar buffer-groups-emacs-source-directory
   (cl-reduce (lambda (val fn)
@@ -50,7 +53,7 @@
 (defun buffer-groups-switch-group ()
   "Switch the active buffer group."
   (interactive)
-  (setf buffer-groups-current-group
+  (setf buffer-groups-current-group-path
         (buffer-groups-read-group-path (buffer-groups-grouped))))
 
 (defun buffer-groups-switch-buffer (&optional all-p)
@@ -60,7 +63,7 @@ If ALL-P (interactively, with prefix), select a group first."
   (cl-labels ()
     (let* ((group-path (if all-p
                            (buffer-groups-read-group-path (buffer-groups-grouped))
-                         (or buffer-groups-current-group
+                         (or buffer-groups-current-group-path
                              (buffer-groups-switch-group))))
            (buffers (mapcar #'buffer-name
                             (cl-letf* ((alist-get-orig (symbol-function 'alist-get))
