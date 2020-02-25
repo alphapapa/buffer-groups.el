@@ -1,4 +1,4 @@
-;;; buffer-groups.el --- Group buffers automatically  -*- lexical-binding: t; -*-
+;;; buffer-groups.el --- Group buffers automatically with rules  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020  Adam Porter
 
@@ -23,16 +23,20 @@
 ;;; Commentary:
 
 ;; This is an early WIP.  The implementation is surprisingly simple
-;; and flexible.  It's sort of like perspectives, but rather than
-;; assigning buffers to groups manually, it's done automatically with
-;; rules written by the user.  The groups can also be nested (if you
-;; are comfortable with that).
+;; and flexible.  It's sort of like perspectives and such packages,
+;; but rather than assigning buffers to groups manually, it's done
+;; automatically with rules written by the user in a simple DSL.  The
+;; groups can also be nested (if you are comfortable with that).
+
+;; To see how grouping rules work, see the default groups defined in
+;; `buffer-groups-groups' at the bottom of the file.
 
 ;;; Code:
 
 ;;;; Requirements
 
 (require 'map)
+(require 'project)
 (require 'subr-x)
 
 (require 'group-tree)
@@ -44,9 +48,12 @@
 (defvar buffer-groups-emacs-source-directory
   (cl-reduce (lambda (val fn)
                (funcall fn val))
+             ;; I feel like Emacs needs a function like `f-parent'.
              '(file-name-directory directory-file-name file-name-directory
                                    directory-file-name file-name-directory)
-             :initial-value (locate-library "cl-lib")))
+             :initial-value (locate-library "cl-lib"))
+  "The top-level directory containing the installed source code for this Emacs.
+Usually this will be something like \"/usr/share/emacs/VERSION\".")
 
 ;;;; Commands
 
@@ -136,7 +143,53 @@ If ALL-P (interactively, with prefix), select a group first."
            when (string-match-p regexp (buffer-name buffer))
            return (or name regexp)))
 
-(defun buffer-groups-group-auto-project (buffer)
+(defun buffer-groups-special-buffer-p (buffer)
+  "Return non-nil if BUFFER is special.
+That is, if its name starts with \"*\"."
+  (string-match-p (rx bos (optional (1+ blank)) "*")
+                  (buffer-name buffer)))
+
+;;;;;; Auto groups
+
+(defmacro buffer-groups-defauto-group (name &rest body)
+  "Define a grouping function named `buffer-groups-group-auto-NAME'.
+It takes one argument, a buffer, which is bound to `buffer' in
+BODY.  It should return a key by which to group its buffer, or
+nil if it should not be grouped.
+
+NAME, okay, `checkdoc'?"
+  (declare (indent defun))
+  (let* ((fn-name (intern (concat "buffer-groups-group-auto-" (symbol-name name))))
+         (docstring (format "Group buffers by %s." name)))
+    `(defun ,fn-name (buffer)
+       ,docstring
+       ,@body)))
+
+(buffer-groups-defauto-group file
+  (when-let* ((filename (or (buffer-file-name buffer)
+                            (buffer-file-name (buffer-base-buffer buffer)))))
+    (concat "File: " (file-name-nondirectory filename))))
+
+(buffer-groups-defauto-group directory
+  (concat "Dir: " (file-truename (buffer-local-value 'default-directory buffer))))
+
+(buffer-groups-defauto-group mode
+  (symbol-name (buffer-local-value 'major-mode buffer)))
+
+(buffer-groups-defauto-group indirect
+  (when (buffer-base-buffer buffer)
+    "*indirect*"))
+
+(buffer-groups-defauto-group hidden
+  (if (string-prefix-p " " (buffer-name buffer))
+      "*hidden*"
+    "Normal"))
+
+(buffer-groups-defauto-group special
+  (when (buffer-groups-special-buffer-p buffer)
+    "*special*"))
+
+(buffer-groups-defauto-group project
   (when-let* ((project (with-current-buffer buffer
                          (project-current)))
               (project-root (car (project-roots project))))
@@ -149,7 +202,10 @@ If ALL-P (interactively, with prefix), select a group first."
     (mode (name &rest modes) `(group-by 'buffer-groups-group-mode (list ,@modes) ,name))
     (mode-match (name &rest regexps) `(group-by 'buffer-groups-group-mode-match (list ,@regexps) ,name))
     (name-match (name &rest regexps) `(group-by 'buffer-groups-group-name-match (list ,@regexps) ,name))
-    (auto-project () `(group-by 'buffer-groups-group-auto-project))))
+    (auto-directory () `(group-by 'buffer-groups-group-auto-directory))
+    (auto-indirect () `(group-by 'buffer-groups-group-auto-indirect))
+    (auto-project () `(group-by 'buffer-groups-group-auto-project))
+    (auto-special () `(group-by 'buffer-groups-group-auto-special))))
 
 ;;;; Customization
 
@@ -161,16 +217,21 @@ If ALL-P (interactively, with prefix), select a group first."
   (list (lambda (buffer)
           "Return non-nil if BUFFER's name starts with a space."
           (string-prefix-p " " (buffer-name buffer))))
-  "FIXME"
+  "Buffers that match these functions are not shown."
   :type '(repeat function))
 
 (defcustom buffer-groups-groups
   (buffer-groups-defgroups
+    (group (group-or "Org"
+                     (dir "~/org" "~/org")
+                     (mode "*Org*" 'org-mode)
+                     (name-match "*Org*" (rx bos "*Org")))
+           (group (name-match "Org QL" (rx bos "*Org QL")))
+           (auto-indirect)
+           (auto-directory))
     (group (dir "Emacs source" buffer-groups-emacs-source-directory))
-    (group (name-match "*Special*" (rx bos "*")))
+    (group (auto-special))
     (group (mode-match "*Helm*" (rx bos "helm-")))
-    (group (dir "~/org" "~/org"))
-    (group (mode "*Org*" 'org-mode))
     (auto-project))
   "Groups in which to put buffers."
   :type 'list)
