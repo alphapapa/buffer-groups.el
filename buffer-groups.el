@@ -43,8 +43,6 @@
 
 ;;;; Variables
 
-(defvar buffer-groups-current-group-path nil)
-
 (defvar buffer-groups-emacs-source-directory
   (cl-reduce (lambda (val fn)
                (funcall fn val))
@@ -58,33 +56,34 @@ Usually this will be something like \"/usr/share/emacs/VERSION\".")
 ;;;; Commands
 
 (defun buffer-groups-switch-group ()
-  "Switch the active buffer group."
+  "Switch the active buffer group for the current frame.
+Return the path."
   (interactive)
-  (setf buffer-groups-current-group-path
-        (buffer-groups-read-group-path (buffer-groups-grouped))))
+  (let ((path (buffer-groups-read-group-path (buffer-groups-grouped))))
+    (set-frame-parameter nil 'buffer-groups-current-group-path path)
+    path))
 
 (defun buffer-groups-switch-buffer (&optional all-p)
   "Switch to another buffer in the current group.
 If ALL-P (interactively, with prefix), select a group first."
   (interactive "P")
-  (cl-labels ()
-    (let* ((group-path (if all-p
-                           (buffer-groups-read-group-path (buffer-groups-grouped))
-                         (or buffer-groups-current-group-path
-                             (buffer-groups-switch-group))))
-           (buffers (mapcar #'buffer-name
-                            (cl-letf* ((alist-get-orig (symbol-function 'alist-get))
-                                       ((symbol-function 'alist-get)
-                                        (lambda (key alist &optional default remove _testfn)
-                                          (funcall alist-get-orig key alist default remove #'string=))))
-                              ;; `map-nested-elt' uses `alist-get', but it does not permit its TESTFN
-                              ;; to be set, so we have to rebind it to one that uses `string='.
-                              (map-nested-elt (buffer-groups-grouped) group-path)))))
-      (if buffers
-          (switch-to-buffer (completing-read "Buffer: " buffers))
-        ;; Group has no buffers anymore: switch group then try again.
-        (buffer-groups-switch-group)
-        (buffer-groups-switch-buffer)))))
+  (let* ((group-path (if all-p
+                         (buffer-groups-switch-group)
+                       (or (frame-parameter nil 'buffer-groups-current-group-path)
+                           (buffer-groups-switch-group))))
+         (buffers (mapcar #'buffer-name
+                          (cl-letf* ((alist-get-orig (symbol-function 'alist-get))
+                                     ((symbol-function 'alist-get)
+                                      (lambda (key alist &optional default remove _testfn)
+                                        (funcall alist-get-orig key alist default remove #'string=))))
+                            ;; `map-nested-elt' uses `alist-get', but it does not permit its TESTFN
+                            ;; to be set, so we have to rebind it to one that uses `string='.
+                            (map-nested-elt (buffer-groups-grouped) group-path)))))
+    (if buffers
+        (switch-to-buffer (completing-read "Buffer: " buffers))
+      ;; Group has no buffers anymore: switch group then try again.
+      (buffer-groups-switch-group)
+      (buffer-groups-switch-buffer))))
 
 ;;;; Functions
 
@@ -120,13 +119,14 @@ If ALL-P (interactively, with prefix), select a group first."
 
 ;; FIXME: Other docstrings.
 
-(defun buffer-groups-group-dir (dirs name buffer)
-  "When BUFFER matches one of DIRS, return NAME or the first DIR."
-  (when-let* ((file-name (buffer-file-name buffer)))
+(defun buffer-groups-group-dir (dirs buffer)
+  "When BUFFER matches one of DIRS, return the first of DIRS."
+  (when-let* ((file-name (or (buffer-file-name buffer)
+                             (buffer-file-name (buffer-base-buffer buffer)))))
     (when (cl-some (lambda (dir)
                      (string-prefix-p (expand-file-name dir) file-name))
                    dirs)
-      (or name (car dirs)))))
+      (car dirs))))
 
 (defun buffer-groups-group-mode (modes name buffer)
   (when (member (buffer-local-value 'major-mode buffer) modes)
@@ -198,7 +198,7 @@ NAME, okay, `checkdoc'?"
 ;;;; Grouping macro
 
 (group-tree-defmacro buffer-groups-defgroups
-  `((dir (name &rest dirs) `(group-by 'buffer-groups-group-dir (list ,@dirs) ,name))
+  `((dir (&rest dirs) `(group-by 'buffer-groups-group-dir (list ,@dirs)))
     (mode (name &rest modes) `(group-by 'buffer-groups-group-mode (list ,@modes) ,name))
     (mode-match (name &rest regexps) `(group-by 'buffer-groups-group-mode-match (list ,@regexps) ,name))
     (name-match (name &rest regexps) `(group-by 'buffer-groups-group-name-match (list ,@regexps) ,name))
@@ -222,14 +222,9 @@ NAME, okay, `checkdoc'?"
 
 (defcustom buffer-groups-groups
   (buffer-groups-defgroups
-    (group (group-or "Org"
-                     (dir "~/org" "~/org")
-                     (mode "*Org*" 'org-mode)
-                     (name-match "*Org*" (rx bos "*Org")))
-           (group (name-match "Org QL" (rx bos "*Org QL")))
-           (auto-indirect)
-           (auto-directory))
-    (group (dir "Emacs source" buffer-groups-emacs-source-directory))
+    (group (group-or (dir "~/org"))
+           (auto-indirect))
+    (group (dir buffer-groups-emacs-source-directory))
     (group (auto-special))
     (group (mode-match "*Helm*" (rx bos "helm-")))
     (auto-project))
