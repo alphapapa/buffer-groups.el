@@ -22,10 +22,8 @@
 
 ;;; Commentary:
 
-;;
-
-;; NOTE: When grouping lists (as opposed to other sequences),
-;; `-group-by' from dash.el would be faster.
+;; This is an early WIP.  The implementation is surprisingly simple
+;; and flexible.
 
 ;;; Code:
 
@@ -40,37 +38,12 @@
 
 (defvar buffer-groups-current-group nil)
 
-;;;; Grouping macro
-
-(group-tree-defmacro buffer-groups-defgroups
-  `((dir (name &rest dirs) `(group-by 'buffer-groups-group-dir ',dirs ,name))
-    (mode (name &rest modes) `(group-by 'buffer-groups-group-mode ',modes ,name))
-    (mode-match (name &rest regexps) `(group-by 'buffer-groups-group-mode-match ',regexps ,name))
-    (name-match (name &rest regexps) `(group-by 'buffer-groups-group-name-match ',regexps ,name))
-    (auto-project () `(group-by 'buffer-groups-group-auto-project))))
-
-;;;; Customization
-
-(defgroup buffer-groups nil
-  "FIXME"
-  :group 'convenience)
-
-(defcustom buffer-groups-filter-fns
-  (list (lambda (buffer)
-          "Return non-nil if BUFFER's name starts with a space."
-          (string-prefix-p " " (buffer-name buffer))))
-  "FIXME"
-  :type '(repeat function))
-
-(defcustom buffer-groups-groups
-  (buffer-groups-defgroups
-    (group (name-match "*Special*" "^\\*"))
-    (group (mode-match "*Helm*" "^helm-"))
-    (group (dir "~/org" "~/org"))
-    (group (mode "*Org*" org-mode))
-    (auto-project))
-  "Groups in which to put buffers."
-  :type 'list)
+(defvar buffer-groups-emacs-source-directory
+  (cl-reduce (lambda (val fn)
+               (funcall fn val))
+             '(file-name-directory directory-file-name file-name-directory
+                                   directory-file-name file-name-directory)
+             :initial-value (locate-library "cl-lib")))
 
 ;;;; Commands
 
@@ -165,6 +138,39 @@ If ALL-P (interactively, with prefix), select a group first."
                          (project-current)))
               (project-root (car (project-roots project))))
     (concat "Project: " project-root)))
+
+;;;; Grouping macro
+
+(group-tree-defmacro buffer-groups-defgroups
+  `((dir (name &rest dirs) `(group-by 'buffer-groups-group-dir (list ,@dirs) ,name))
+    (mode (name &rest modes) `(group-by 'buffer-groups-group-mode (list ,@modes) ,name))
+    (mode-match (name &rest regexps) `(group-by 'buffer-groups-group-mode-match (list ,@regexps) ,name))
+    (name-match (name &rest regexps) `(group-by 'buffer-groups-group-name-match (list ,@regexps) ,name))
+    (auto-project () `(group-by 'buffer-groups-group-auto-project))))
+
+;;;; Customization
+
+(defgroup buffer-groups nil
+  "FIXME"
+  :group 'convenience)
+
+(defcustom buffer-groups-filter-fns
+  (list (lambda (buffer)
+          "Return non-nil if BUFFER's name starts with a space."
+          (string-prefix-p " " (buffer-name buffer))))
+  "FIXME"
+  :type '(repeat function))
+
+(defcustom buffer-groups-groups
+  (buffer-groups-defgroups
+    (group (dir "Emacs source" buffer-groups-emacs-source-directory))
+    (group (name-match "*Special*" (rx bos "*")))
+    (group (mode-match "*Helm*" (rx bos "helm-")))
+    (group (dir "~/org" "~/org"))
+    (group (mode "*Org*" 'org-mode))
+    (auto-project))
+  "Groups in which to put buffers."
+  :type 'list)
 
 ;;;; Footer
 
