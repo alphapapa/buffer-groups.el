@@ -31,18 +31,19 @@
 
 ;;;; Requirements
 
+(require 'map)
+(require 'subr-x)
+
 (require 'group-tree)
 
 ;;;; Variables
-
-(defvar buffer-groups-groups nil)
 
 (defvar buffer-groups-current-group nil)
 
 ;;;; Grouping macro
 
 (group-tree-defmacro buffer-groups-defgroups
-  `((dir (&rest dirs) `(group-by 'buffer-groups-group-dir ',dirs))
+  `((dir (name &rest dirs) `(group-by 'buffer-groups-group-dir ',dirs ,name))
     (mode (name &rest modes) `(group-by 'buffer-groups-group-mode ',modes ,name))
     (mode-match (name &rest regexps) `(group-by 'buffer-groups-group-mode-match ',regexps ,name))
     (name-match (name &rest regexps) `(group-by 'buffer-groups-group-name-match ',regexps ,name))
@@ -61,43 +62,88 @@
   "FIXME"
   :type '(repeat function))
 
+(defcustom buffer-groups-groups
+  (buffer-groups-defgroups
+    (group (name-match "*Special*" "^\\*"))
+    (group (mode-match "*Helm*" "^helm-"))
+    (group (dir "~/org" "~/org"))
+    (group (mode "*Org*" org-mode))
+    (auto-project))
+  "Groups in which to put buffers."
+  :type 'list)
+
 ;;;; Commands
 
-(defun buffer-groups-apply ()
-  "Apply `buffer-groups' grouping to buffers."
-  (interactive)
-  (group-tree buffer-groups-groups (buffer-list) ))
-
-(defun buffer-groups-grouped ()
-  "Return buffers grouped."
-  (group-tree buffer-groups-groups
-              (cl-loop with buffers = (buffer-list)
-                       for fn in buffer-groups-filter-fns
-                       do (setf buffers (cl-remove-if fn buffers))
-                       finally return buffers)))
-
 (defun buffer-groups-switch-group ()
+  "Switch the active buffer group."
   (interactive)
-  (when-let* ((selected-group
-               (completing-read "Group: " (mapcar #'car (buffer-groups-grouped)))))
-    (setf buffer-groups-current-group selected-group)))
+  (setf buffer-groups-current-group
+        (buffer-groups-read-group-path (buffer-groups-grouped))))
 
-(defun buffer-groups-switch-buffer ()
-  (interactive)
-  (let* ((group (completing-read "Group: " (mapcar #'car (buffer-groups-grouped))))
-         (buffer (completing-read "Buffer: "
-                                  (mapcar #'buffer-name
-                                          (alist-get group (buffer-groups-grouped) nil nil #'string=)))))
-    (switch-to-buffer buffer)))
+(defun buffer-groups-switch-buffer (&optional all-p)
+  "Switch to another buffer in the current group.
+If ALL-P (interactively, with prefix), select a group first."
+  (interactive "P")
+  (cl-labels ()
+    (let* ((group-path (if all-p
+                           (buffer-groups-read-group-path (buffer-groups-grouped))
+                         (or buffer-groups-current-group
+                             (buffer-groups-switch-group))))
+           (buffers (mapcar #'buffer-name
+                            (cl-letf* ((alist-get-orig (symbol-function 'alist-get))
+                                       ((symbol-function 'alist-get)
+                                        (lambda (key alist &optional default remove _testfn)
+                                          (funcall alist-get-orig key alist default remove #'string=))))
+                              ;; `map-nested-elt' uses `alist-get', but it does not permit its TESTFN
+                              ;; to be set, so we have to rebind it to one that uses `string='.
+                              (map-nested-elt (buffer-groups-grouped) group-path)))))
+      (if buffers
+          (switch-to-buffer (completing-read "Buffer: " buffers))
+        ;; Group has no buffers anymore: switch group then try again.
+        (buffer-groups-switch-group)
+        (buffer-groups-switch-buffer)))))
 
 ;;;; Functions
 
-(defun buffer-groups-group-dir (dirs buffer)
+(cl-defun buffer-groups-read-item (items &key (leaf-key #'identity))
+  (cl-labels ((read-item
+               (items) (cl-typecase (car items)
+                         (list (let ((key (completing-read "Group: " (mapcar #'car items))))
+                                 (read-item (alist-get key items nil nil #'string=))))
+                         (atom (completing-read "Buffer: " (mapcar leaf-key items))))))
+    (read-item items)))
+
+(defun buffer-groups-read-group-path (groups)
+  (cl-labels ((read-group
+               (items last-key)
+               (cl-typecase (car items)
+                 (list (list last-key
+                             (let ((key (completing-read "Group: " (mapcar #'car items))))
+                               (read-group (alist-get key items nil nil #'string=) key))))
+                 (atom last-key))))
+    (let ((path (cadr (read-group groups nil))))
+      (cl-typecase path
+        (list path)
+        (atom (list path))))))
+
+(cl-defun buffer-groups-grouped (&optional (groups buffer-groups-groups))
+  "Return buffers grouped by GROUPS."
+  (group-tree groups (cl-loop with buffers = (buffer-list)
+                              for fn in buffer-groups-filter-fns
+                              do (setf buffers (cl-remove-if fn buffers))
+                              finally return buffers)))
+
+;;;;; Grouping predicates
+
+;; FIXME: Other docstrings.
+
+(defun buffer-groups-group-dir (dirs name buffer)
+  "When BUFFER matches one of DIRS, return NAME or the first DIR."
   (when-let* ((file-name (buffer-file-name buffer)))
     (when (cl-some (lambda (dir)
                      (string-prefix-p (expand-file-name dir) file-name))
                    dirs)
-      (car dirs))))
+      (or name (car dirs)))))
 
 (defun buffer-groups-group-mode (modes name buffer)
   (when (member (buffer-local-value 'major-mode buffer) modes)

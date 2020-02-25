@@ -31,15 +31,6 @@
 (require 'cl-lib)
 (require 'seq)
 
-;;;; Variables
-
-
-;;;; Customization
-
-
-;;;; Commands
-
-
 ;;;; Functions
 
 (defun group-tree (fns sequence)
@@ -116,16 +107,14 @@ The resulting group is named NAME."
 
 ;;;;; Group-defining macro
 
-;; This macro provides a concise vocabulary for defining groups.  To
-;; allow easy extension, the macro itself is defined with a macro that
-;; adds forms defined in `group-tree-vocabulary', which should be
-;; bound around the call to `group-tree-defmacro'.
+;; This macro provides a concise vocabulary for defining a
+;; group-defining macro.
 
-(defvar group-tree-vocabulary nil
-  "FIXME: Docstring.")
-
-(defmacro group-tree-defmacro (name vocabulary)
-  "FIXME: Docstring."
+(defmacro group-tree-defmacro (name &optional vocabulary)
+  "Define a macro, NAME.
+If VOCABULARY, it is added to the `cl-macrolet' form in the
+defined macro."
+  ;; FIXME: Mention applicators/base groups in docstring.
   (declare (indent defun))
   `(defmacro ,name (&rest groups)
      "Expand GROUPS into a group definition suitable for `group-tree-groups'.
