@@ -30,6 +30,8 @@
 
 (require 'helm)
 
+(require 'buffer-groups)
+
 ;;;; Variables
 
 (defvar helm-buffer-groups-source
