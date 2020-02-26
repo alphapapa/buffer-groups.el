@@ -71,21 +71,27 @@ If ALL-P (interactively, with prefix), select a group first."
                          (buffer-groups-switch-group)
                        (or (frame-parameter nil 'buffer-groups-current-group-path)
                            (buffer-groups-switch-group))))
-         (buffers (mapcar #'buffer-name
-                          (cl-letf* ((alist-get-orig (symbol-function 'alist-get))
-                                     ((symbol-function 'alist-get)
-                                      (lambda (key alist &optional default remove _testfn)
-                                        (funcall alist-get-orig key alist default remove #'string=))))
-                            ;; `map-nested-elt' uses `alist-get', but it does not permit its TESTFN
-                            ;; to be set, so we have to rebind it to one that uses `string='.
-                            (map-nested-elt (buffer-groups-grouped) group-path)))))
-    (if buffers
-        (switch-to-buffer (completing-read "Buffer: " buffers))
+         (buffer-names (mapcar #'buffer-name (buffer-groups-buffers group-path))))
+    (if buffer-names
+        (switch-to-buffer (completing-read "Buffer: " buffer-names))
       ;; Group has no buffers anymore: switch group then try again.
       (buffer-groups-switch-group)
       (buffer-groups-switch-buffer))))
 
 ;;;; Functions
+
+(cl-defun buffer-groups-buffers
+    (&optional (group-path (or (frame-parameter nil 'buffer-groups-current-group-path)
+                               (buffer-groups-switch-group))))
+  "Return list of buffers for GROUP-PATH.
+By default, use the current frame's current group."
+  (cl-letf* ((alist-get-orig (symbol-function 'alist-get))
+             ((symbol-function 'alist-get)
+              (lambda (key alist &optional default remove _testfn)
+                (funcall alist-get-orig key alist default remove #'string=))))
+    ;; `map-nested-elt' uses `alist-get', but it does not permit its TESTFN
+    ;; to be set, so we have to rebind it to one that uses `string='.
+    (map-nested-elt (buffer-groups-grouped) group-path)))
 
 (cl-defun buffer-groups-read-item (items &key (leaf-key #'identity))
   (cl-labels ((read-item
